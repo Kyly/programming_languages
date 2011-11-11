@@ -1,0 +1,180 @@
+
+from misc import *
+import crypt
+import time
+
+def strip_newlines(l):
+    """Strips newline characters from the end of all strings in list l"""
+    for w in range(len(l)):
+        l[w] = l[w].rstrip("\n")
+    return l
+
+def load_words(filename,regexp):
+    """Load the words from the file filename that match the regular
+       expression regexp.  Returns a list of matching words in the order
+       they are in the file."""
+    wordsf = open(filename).readlines()
+    regexp = re.compile(regexp)
+    words = []
+    for w in wordsf:
+        word = w.rstrip("\n")
+        if re.match(regexp, word):
+            words.append(word)
+    return words
+
+def transform_reverse(s):
+    """Returns a list containing str and the reverse of string"""
+    wr = [s]
+    w = ""
+    for c in range(len(s)):
+        w = w+s[len(s)-c-1]
+    wr.append(w)
+    return wr
+
+def transform_capitalize(st):
+    """Returns a list containing all possible ways to capitalize str."""
+    words = [""]
+    cr = []
+    for c in st.lower():
+        for s in words:
+            cr.append(s+c)				#adds a lowercase c to each word in list
+            if (c.isalpha()):
+                cr.append(s+c.capitalize()) #adds uppercase to each
+        words = cr[:]					#copies the cr list to words
+        cr = []							#resets cr
+    return words
+
+def transform_digits(st):
+    """Returns a list containing all possible ways to letters can be replaced
+       similar looking numbers. Possible mappings are defined as follows:
+       o->0, z->2, a->4, b->6, b->8, i->1, l->1, e->3, s->5, t->7, g->9, q->9"""
+    words = [""]
+    cr = []
+    code = {"o":"0","z":"2","a":"4","b":("6","8"),"i":"1","l":"1","e":"3","s":"5","t":"7","g":"9","q":"9"}
+    for c in st:
+        for s in words:
+            cr.append(s+c)
+            if code.has_key(c.lower()):
+                for co in code[c.lower()]:
+                    cr.append(s+co)
+        words = cr[:]
+        cr = []
+    return words
+
+def check_pass(plain,enc):
+    """Check to see if the plaintext plain encrypts to the encrypted
+       text enc"""
+    if enc == crypt.crypt(plain,enc[:2]):
+        return True
+    else:
+        return False
+    
+
+def load_passwd(filename):
+    """Load the password file filename and returns a list of
+       dictionaries with fields "account", "password", "UID", "GID",
+       "GECOS", "directory", and "shell", each mapping to the
+       corresponding field of the file."""
+    lines = open(filename).readlines()
+    users = []
+    for line in lines:
+        u = line.split(":")
+        users.append({'account':u[0],'password':u[1],'UID':u[2],'GID':u[3],'GECOS':u[4],'directory':u[5],'shell':u[6].rstrip("\n")})
+    return users
+
+def transform_combinations(w):
+    """Returns a list of all combinations of w defined by the functions
+       transform_digits, transform_capitalize, and transform_reverse."""
+    l = []
+    for td in transform_digits(w):
+        for tc in transform_capitalize(td):
+            for tr in transform_reverse(tc):
+                l.append(tr)
+    return l
+
+def transform_reverse_caps(w):
+    """Returns a list of all random capitalizations of the word w reversed."""
+    return [transform_reverse(tc) for tc in transform_capitalize(w)]
+
+def transform_reverse_digits(w):
+    """Returns a list of all digit transformations of word w reversed."""
+    return [transform_reverse(td)[1] for td in transform_digits(w)]
+
+def transform_caps_reverse(w):
+    """Returns a list of all random capitalizations of the word w and their reverse."""
+    return [tr for tc in transform_capitalize(w) for tr in transform_reverse(tc)]
+
+def transform_digits_reverse(w):
+    """Returns a list of all random capitalizations of the word w and their reverse."""
+    return [tr for tc in transform_digits(w) for tr in transform_reverse(tc)]
+
+def transform_reverse_only(w):
+    """Returns a list of a single item, the reverse of w."""
+    return [transform_reverse(w)[1]]
+
+def crack_given_transform(fn,ws,user_dict,f, t):
+    """Takes a function, a word list, and an encrypted password. The function
+       passed should take a single word and return a list of transformations of
+       that word. If the password is found, a tuple is returned with the first
+       element as True and the second element as the password."""
+    result = {}
+    pwords = user_dict.keys()
+    for w in ws:
+        for code in fn(w):
+            for pword in user_dict.keys():
+                if check_pass(code, pword):
+                    for a in user_dict[pword]:
+                        result[a] = code
+                        print a+"="+code
+                        f.write(a+"="+code+"\n")
+                        f.flush()
+                        del user_dict[pword]
+                        if len(user_dict)%10 == 0: print "Minutes elapsed:"+str((time.time()-t)/60)
+                        if len(user_dict) == 0:
+                            return result
+    return result
+
+def crack_pass_file(fn_pass,words,out):
+    """Crack as many passwords in file fn_pass as possible using words
+       in the file words"""
+    users = load_passwd(fn_pass)
+    #ws = load_words("words",r'^[A-Za-z0-9].{5,7}$')
+    temp_ws = strip_newlines(open(words).readlines())
+    ws = []
+    for w in temp_ws:
+        if len(w)>5 and len(w)<9:
+            ws.append(w)
+    f = open(out, "w")
+
+    #user_dict is adictionary with encrypted passwords as keys and a list of 
+    #users using that password as values
+    user_dict = {}             
+    for u in users:
+        if user_dict.has_key(u["password"]):
+            user_dict[u["password"]].append(u["account"])
+        else:
+            user_dict[u["password"]] = [u["account"]]
+
+    t1 = time.time()
+
+    transform_fns = [lambda x: [x],
+                     transform_reverse_only,
+                     transform_digits,
+                     transform_reverse_digits,
+                     transform_capitalize,
+                     transform_reverse_caps,
+                     transform_combinations]
+    transform_explain = ["Checking for untransformed passwords",
+                         "Checking for reversed word passwords",
+                         "Checking for digit transformed passwords",
+                         "Checking for the reverse of digit transformed password",
+                         "Checking for randomly capitalized passwords",
+                         "Checking for the reverse of randomly capitalized passwords",
+                         "Checking for all combination passwords"]
+
+    for tf,te in zip(transform_fns,transform_explain):
+        if len(user_dict)>0:
+            print te+":"
+            crack_given_transform(tf,ws,user_dict,f,t1)
+
+    print "Minutes elapsed: "+str((time.time()- t1)/60)
